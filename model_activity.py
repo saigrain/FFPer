@@ -291,121 +291,139 @@ def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 1.1,
     so = np.argsort(faps)
     return periods[so], faps[so]
 
-if __name__ == "__main__":
+# def FFPer(x, y, z,
+#           y_sig = None, z_sig = None, s = None,
+#           do_plot = True, verbose = True,
+#           do_save = False, save_name = 'FFPer',
+#           transiting_planets = [],
+#           max_n_peaks = 1,
+#           FAP_threshold = 0.05):
 
-    # TODO:
-    # - read in from .mat, .sav or .rdb file
-    # - user specifies whether to produce plots and where to save them
-    do_plot = True
-    do_save = False
-    save_name = 'FFPer'
-    verbose = True
-    # - user specifies which activity indicator is used
-    # - user specifies how much WN to add (both to data and to uncerts)
-    WN = 0.3
-    # - user specifies how many seasons to use
-    S_MAX = 4
-    # - user specifies any transiting planets
-    transiting_planets = []
-    # - user specifies whether to run a fit with no planets /
-    #   transiting planets only
-    fit_known_only = True
-    # - user specifies max no. peaks and FAP threshold in L1 periodogram
-    max_n_peaks = 1
-    FAP_threshold = 0.05
-    
-    # read in data
-    from scipy.io import loadmat
-    root = '/Users/aigrain/Data/meunier2024/blind/data/'
-    fl = root + 'my_serie_res_bt_G2_1000_4m_NOISE0.09_OGS_MAG_real3.mat'    
-    d = loadmat(fl)
-    x = np.array(d['tt']).flatten()
-    y = np.array(d['rv']).flatten()
-    z = np.array(d['ca']).flatten()
-    y_sig = np.zeros_like(y) + 0.09 # see M+23, section 2.1.3
-    z_sig = np.zeros_like(z) + 5e-4 # see M+23, section 2.1.3
-    s = np.floor((x-min(x)+30) / 365).astype(int)
+#     if y_err is None:
+#         p2p = np.median(abs(y[1:]-y[:-1]))
+#         y_sig = np.zeros_like(y) + p2p
+#     if z_sig is None:
+#         p2p = np.median(abs(z[1:]-z[:-1]))
+#         z_sig = np.zeros_like(z) + p2p
+#     if s is None:
+#         s = np.floor((x-min(x)+30) / 365).astype(int)
 
-    # add white noise if requested
-    if WN > 0:
-        y += np.random.normal(0, WN, len(y))    
-        y_sig = np.sqrt(y_sig**2 + WN**2)
+#     # extract activity basis
+#     activity_terms, activity_periods, GP_par = \
+#         extract_activity_basis(x, z, zerr = z_sig,
+#                                do_plot = do_plot, do_save = do_save,
+#                                save_name = save_name, verbose = verbose)
+#     Basis = construct_basis(x, activity_terms, transiting_planets)
+
+#     # perform fit using only activity and known planets
+#     resid, coeff = fit_basis(x, y, y_sig, Basis, \
+#                              do_plot = do_plot, do_save = do_save, \
+#                              save_name = save_name + '_known', \
+#                              verbose = verbose)
+
+#     # Run L1 periodogram, including activity basis set as unpenalised vectors
+#     if max_n_peaks > 0:
+#         new_periods, faps = run_l1_periodogram(x, y, s, y_sig, \
+#                                                basis = Basis, 
+#                                                sig_add_w = 0.0, \
+#                                                fap_threshold = FAP_threshold, \
+#                                                n_pk_eval_max = max_n_peaks)
+#         if verbose:
+#             for i, per in enumerate(new_periods):
+#                 print(f'New signal {i+1}: period {per:.3f}, log10FAP {faps[i]:.2e}')
+#     else:
+#         new_periods = []
         
-    # select seasons
-    l = s < S_MAX
-    x = x[l]
-    y = y[l]
-    y_sig = y_sig[l]
-    z = z[l]
-    z_sig = z_sig[l]
+#     # Add newly found period(s) to basis and perform fit again
+#     if len(new_periods) > 0:
+#         Basis = construct_basis(x, activity_terms, \
+#                                 transiting_planets, new_periods)
 
-    # specify (known) transiting planets
-    transiting_planets = []
-    per_inj = []
-    
-    # extract activity basis
-    activity_terms, activity_periods, GP_par = \
-        extract_activity_basis(x, z, zerr = z_sig,
-                               do_plot = do_plot, do_save = do_save,
-                               save_name = save_name, verbose = verbose)
-    per_cyc, per_rot = activity_periods
-    known_basis = construct_basis(x, activity_terms, transiting_planets)
-
-    if fit_known_only:
-        resid, coeff = fit_basis(x, y, y_sig, known_basis, \
-                                 do_plot = do_plot, do_save = do_save, \
-                                 save_name = save_name + '_known', \
-                                 verbose = verbose)
-
-    # Run L1 periodogram, including activity basis set as unpenalised vectors
-    if max_n_peaks > 0:
-        new_periods, faps = run_l1_periodogram(x, y, s, y_sig, \
-                                               basis = known_basis, 
-                                               sig_add_w = 0.0, \
-                                               fap_threshold = FAP_threshold, \
-                                               n_pk_eval_max = max_n_peaks)
-        if verbose:
-            for i, per in enumerate(new_periods):
-                print(f'New signal {i+1}: period {per:.3f}, log10FAP {faps[i]:.2e}')
-    else:
-        new_periods = []
+#         # *** will need to specify flags here ***
         
-    # Add newly found period(s) to basis and perform fit again
-    if len(new_periods) > 0:
-        extended_basis = construct_basis(x, activity_terms, \
-                                         transiting_planets, new_periods)
+#         resid, coeff = fit_basis(x, y, y_sig, extended_basis, \
+#                                  do_plot = do_plot, do_save = False, \
+#                                  verbose = verbose)
 
-        # *** will need to specify flags here ***
+#     if do_plot:
+#         # Add newly vertical lines to periodogram in last figure
+#         per_cyc, per_rot = activity_periods
+#         plt.sca(plt.gcf().axes[0])
+#         for i in range(len(new_periods)):
+#             plt.axvline(new_periods[i], color = 'C2', ls = 'dashed', alpha = 0.5)
+#         plt.axvline(per_rot, color = 'C0', ls = 'dashed', alpha = 0.5)
+#         plt.axvline(per_rot/2, color = 'C0', ls = 'dashed', alpha = 0.5)
+#         if per_cyc>0:
+#             plt.axvline(per_cyc, color = 'C0', ls = 'dotted', alpha = 0.5)
+#         if do_save:
+#             plt.savefig(save_dir + save_name + '_fit.png')
+
+#     return (new_periods, faps, coeffs), Basis, (activity_periods, GP_par)
+    
+
         
-        resid, coeff = fit_basis(x, y, y_sig, extended_basis, \
-                                 do_plot = do_plot, do_save = False, \
-                                 verbose = verbose)
+# if __name__ == "__main__":
 
-    if do_plot:
-        # Add newly vertical lines to periodogram in last figure
-        plt.sca(plt.gcf().axes[0])
-        for i in range(len(new_periods)):
-            plt.axvline(new_periods[i], color = 'C2', ls = 'dashed', alpha = 0.5)
-        plt.axvline(per_rot, color = 'C0', ls = 'dashed', alpha = 0.5)
-        plt.axvline(per_rot/2, color = 'C0', ls = 'dashed', alpha = 0.5)
-        if per_cyc>0:
-            plt.axvline(per_cyc, color = 'C0', ls = 'dotted', alpha = 0.5)
-        for i in range(len(per_inj)):
-            plt.axvline(per_inj[i], color = 'C3', ls = 'dotted', alpha = 0.5)
-        if do_save:
-            plt.savefig(save_dir + save_name + '_fit.png')
+#     # Example run on one of Nadege's time-series with my planet
+#     # injected, just to test the code
+    
+#     # read in data
+#     from scipy.io import loadmat
+#     root = '/Users/aigrain/Data/meunier2024/blind/data/'
+#     fl = root + 'my_serie_res_bt_G2_1000_4m_NOISE0.09_OGS_MAG_real3.mat'    
+#     d = loadmat(fl)
+#     x = np.array(d['tt']).flatten()
+#     y = np.array(d['rv']).flatten()
+#     z = np.array(d['ca']).flatten()
+#     y_sig = np.zeros_like(z) + 0.09 # see M+23, section 2.1.3
+#     z_sig = np.zeros_like(z) + 5e-4 # see M+23, section 2.1.3
+
+#     # add white noise
+#     WN = 0.3
+#     y += np.random.normal(0, WN, len(y))    
+#     y_sig = np.sqrt(y_sig**2 + WN**2)
+        
+#     # select seasons
+#     l = s < 4
+#     x = x[l]
+#     y = y[l]
+#     y_sig = y_sig[l]
+#     z = z[l]
+#     z_sig = z_sig[l]
+
+#     # specify (known) transiting planets
+#     transiting_planets = []
+
+#     # run FFPer
+#     res = FFPer(x, y, z, y_sig, z_sig, s = None,
+#                 do_plot = True, verbose = True,
+#                 do_save = False, save_name = 'FFPer',
+#                 transiting_planets = [],
+#                 max_n_peaks = 1,
+#                 FAP_threshold = 0.05)
+
+
+#     # amp = np.sqrt(coeff[4]**2 + coeff[5]**2) # factor 2 bc basis term normalised to 1 pk2pk
+#     # pha = np.arctan2(coeff[4], coeff[5]) / np.pi /2
+#     # if pha < 0:
+#     #     pha += 1
+#     # lin = f"{i:3d} {per_cyc:7.1f} {per_rot:6.2f} {per_inj[i]:8.3f} {periods[0]:8.3f} "
+#     # lin += f"{amp_inj[i]:6.2f} {amp:6.2f} {pha_inj[i]:7.2f} {pha:7.2f} {faps[0]:10.2e}"
+#     # with open(outfl, 'a') as f:
+#     #     f.write(lin + "\n")
+#     # print(lin)
 
     
-    # amp = np.sqrt(coeff[4]**2 + coeff[5]**2) # factor 2 bc basis term normalised to 1 pk2pk
-    # pha = np.arctan2(coeff[4], coeff[5]) / np.pi /2
-    # if pha < 0:
-    #     pha += 1
-    # lin = f"{i:3d} {per_cyc:7.1f} {per_rot:6.2f} {per_inj[i]:8.3f} {periods[0]:8.3f} "
-    # lin += f"{amp_inj[i]:6.2f} {amp:6.2f} {pha_inj[i]:7.2f} {pha:7.2f} {faps[0]:10.2e}"
-    # with open(outfl, 'a') as f:
-    #     f.write(lin + "\n")
-    # print(lin)
+#     # amp = np.sqrt(coeff[4]**2 + coeff[5]**2) # factor 2 bc basis term normalised to 1 pk2pk
+#     # pha = np.arctan2(coeff[4], coeff[5]) / np.pi /2
+#     # if pha < 0:
+#     #     pha += 1
+#     # lin = f"{i:3d} {per_cyc:7.1f} {per_rot:6.2f} {per_inj[i]:8.3f} {periods[0]:8.3f} "
+#     # lin += f"{amp_inj[i]:6.2f} {amp:6.2f} {pha_inj[i]:7.2f} {pha:7.2f} {faps[0]:10.2e}"
+#     # with open(outfl, 'a') as f:
+#     #     f.write(lin + "\n")
+#     # print(lin)
 
 
     
-    plt.show()
+#     plt.show()
