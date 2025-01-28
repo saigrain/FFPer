@@ -5,6 +5,9 @@ from george import GP, kernels
 from scipy.optimize import minimize
 from scipy.interpolate import interp1d
 from sklearn.linear_model import LinearRegression
+import sys
+sys.path.append('/Users/aigrain/OneDrive - Nexus365/Documents/Soft/l1periodogram/l1periodogram_codes/')
+import l1periodogram_v1, covariance_matrices
 
 MIN_SPAN_CYCLE = 8
     
@@ -252,8 +255,66 @@ def fit_basis(x, y, yerr, basis, flags = None,
             plt.savefig(save_dir + save_name + '_fit.png')
     return resid, coeff
 
+def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 1.1,
+                       sig_add_w = 0.5, fap_threshold = 0.05,
+                       n_pk_eval_max = 10):
+    
+    if basis is None:
+        basis = np.zeros((1, len(x)))
+
+    x0 = np.floor(x.min())
+    t = x - x0
+    
+    c = l1periodogram_v1.l1p_class(t,y)
+    sigmaW = sig_add_w # add in quadrature 0.5 m/s to the nominal uncertainties 
+    sigmaR, tau = 0. ,0. # no red noise
+    sigma_calib = 0. # no calibration noise
+    V = covariance_matrices.covar_mat(t, np.ones(len(c.t)) * yerr, \
+                                      sigmaW, sigmaR, sigma_calib, tau)
+    c.set_model(omegamax = 2*np.pi/per_min, 
+                V = V,
+                MH0 = basis.T, 
+                verbose=0)
+    c.l1_perio(numerical_method='lars',
+               significance_evaluation_methods = ['fap','evidence_laplace'],
+               max_n_significance_tests=n_pk_eval_max,
+               verbose=0, plot_output = False)
+
+    periods = 2*np.pi/c.omega_peaks
+    npk = len(periods)
+    if npk > n_pk_eval_max:
+        periods = periods[:n_pk_eval_max]
+    faps = c.significance['log10faps']
+    l = faps < np.log10(fap_threshold)
+    periods = periods[l]
+    faps = faps[l]
+    so = np.argsort(faps)
+    return periods[so], faps[so]
+
 if __name__ == "__main__":
 
+    # TODO:
+    # - read in from .mat, .sav or .rdb file
+    # - user specifies whether to produce plots and where to save them
+    do_plot = True
+    do_save = False
+    save_name = 'FFPer'
+    verbose = True
+    # - user specifies which activity indicator is used
+    # - user specifies how much WN to add (both to data and to uncerts)
+    WN = 0.3
+    # - user specifies how many seasons to use
+    S_MAX = 4
+    # - user specifies any transiting planets
+    transiting_planets = []
+    # - user specifies whether to run a fit with no planets /
+    #   transiting planets only
+    fit_known_only = True
+    # - user specifies max no. peaks and FAP threshold in L1 periodogram
+    max_n_peaks = 1
+    FAP_threshold = 0.05
+    
+    # read in data
     from scipy.io import loadmat
     root = '/Users/aigrain/Data/meunier2024/blind/data/'
     fl = root + 'my_serie_res_bt_G2_1000_4m_NOISE0.09_OGS_MAG_real3.mat'    
@@ -261,27 +322,90 @@ if __name__ == "__main__":
     x = np.array(d['tt']).flatten()
     y = np.array(d['rv']).flatten()
     z = np.array(d['ca']).flatten()
-    WN = 0.3 # White noise to add to data to make it HARPS3-like
-    y += np.random.normal(0, WN, len(y))    
-    y_sig = np.zeros_like(y) + np.sqrt(0.09**2 + WN**2) # see M+23, section 2.1.3
+    y_sig = np.zeros_like(y) + 0.09 # see M+23, section 2.1.3
     z_sig = np.zeros_like(z) + 5e-4 # see M+23, section 2.1.3
     s = np.floor((x-min(x)+30) / 365).astype(int)
 
-    l = s < 10
+    # add white noise if requested
+    if WN > 0:
+        y += np.random.normal(0, WN, len(y))    
+        y_sig = np.sqrt(y_sig**2 + WN**2)
+        
+    # select seasons
+    l = s < S_MAX
     x = x[l]
     y = y[l]
     y_sig = y_sig[l]
     z = z[l]
     z_sig = z_sig[l]
+
+    # specify (known) transiting planets
+    transiting_planets = []
+    per_inj = []
     
+    # extract activity basis
     activity_terms, activity_periods, GP_par = \
         extract_activity_basis(x, z, zerr = z_sig,
-                               do_plot = True, do_save = False,
-                               save_name = 'FFper', verbose = True)
+                               do_plot = do_plot, do_save = do_save,
+                               save_name = save_name, verbose = verbose)
+    per_cyc, per_rot = activity_periods
+    known_basis = construct_basis(x, activity_terms, transiting_planets)
 
-    basis = construct_basis(x, activity_terms)
-    resid, coeff = fit_basis(x, y, y_sig, basis, 
-                                do_plot = True)
-    print(coeff)
+    if fit_known_only:
+        resid, coeff = fit_basis(x, y, y_sig, known_basis, \
+                                 do_plot = do_plot, do_save = do_save, \
+                                 save_name = save_name + '_known', \
+                                 verbose = verbose)
+
+    # Run L1 periodogram, including activity basis set as unpenalised vectors
+    if max_n_peaks > 0:
+        new_periods, faps = run_l1_periodogram(x, y, s, y_sig, \
+                                               basis = known_basis, 
+                                               sig_add_w = 0.0, \
+                                               fap_threshold = FAP_threshold, \
+                                               n_pk_eval_max = max_n_peaks)
+        if verbose:
+            for i, per in enumerate(new_periods):
+                print(f'New signal {i+1}: period {per:.3f}, log10FAP {faps[i]:.2e}')
+    else:
+        new_periods = []
+        
+    # Add newly found period(s) to basis and perform fit again
+    if len(new_periods) > 0:
+        extended_basis = construct_basis(x, activity_terms, \
+                                         transiting_planets, new_periods)
+
+        # *** will need to specify flags here ***
+        
+        resid, coeff = fit_basis(x, y, y_sig, extended_basis, \
+                                 do_plot = do_plot, do_save = False, \
+                                 verbose = verbose)
+
+    if do_plot:
+        # Add newly vertical lines to periodogram in last figure
+        plt.sca(plt.gcf().axes[0])
+        for i in range(len(new_periods)):
+            plt.axvline(new_periods[i], color = 'C2', ls = 'dashed', alpha = 0.5)
+        plt.axvline(per_rot, color = 'C0', ls = 'dashed', alpha = 0.5)
+        plt.axvline(per_rot/2, color = 'C0', ls = 'dashed', alpha = 0.5)
+        if per_cyc>0:
+            plt.axvline(per_cyc, color = 'C0', ls = 'dotted', alpha = 0.5)
+        for i in range(len(per_inj)):
+            plt.axvline(per_inj[i], color = 'C3', ls = 'dotted', alpha = 0.5)
+        if do_save:
+            plt.savefig(save_dir + save_name + '_fit.png')
+
+    
+    # amp = np.sqrt(coeff[4]**2 + coeff[5]**2) # factor 2 bc basis term normalised to 1 pk2pk
+    # pha = np.arctan2(coeff[4], coeff[5]) / np.pi /2
+    # if pha < 0:
+    #     pha += 1
+    # lin = f"{i:3d} {per_cyc:7.1f} {per_rot:6.2f} {per_inj[i]:8.3f} {periods[0]:8.3f} "
+    # lin += f"{amp_inj[i]:6.2f} {amp:6.2f} {pha_inj[i]:7.2f} {pha:7.2f} {faps[0]:10.2e}"
+    # with open(outfl, 'a') as f:
+    #     f.write(lin + "\n")
+    # print(lin)
+
+
     
     plt.show()
