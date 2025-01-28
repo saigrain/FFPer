@@ -4,11 +4,13 @@ from astropy.timeseries import LombScargle
 from george import GP, kernels
 from scipy.optimize import minimize
 from scipy.interpolate import interp1d
+from sklearn.linear_model import LinearRegression
 
 MIN_SPAN_CYCLE = 8
     
 def extract_activity_basis(x, z, zerr = None, 
-                           do_plot = True, do_save = False, save_name = 'FFper', verbose = False):
+                           do_plot = True, do_save = False, \
+                           save_name = 'FFper', verbose = False):
     '''Model activity time-series to extract basis terms to use in RV fitting'''
 
     # divide into seasons
@@ -110,7 +112,8 @@ def extract_activity_basis(x, z, zerr = None,
     G = np.zeros(nobs)
     dG = np.zeros(nobs)
     if do_plot:
-        fig, ax = plt.subplots(ns,1,sharex = True, sharey = True,figsize=(8,1.5*ns))
+        fig, ax = plt.subplots(ns,1,sharex = True, sharey = True,\
+                               figsize = (8, 1.5 * ns))
     for i,s_ in enumerate(su):
         l = s == s_
         xoff = x0 + i * 365
@@ -126,12 +129,14 @@ def extract_activity_basis(x, z, zerr = None,
         dG[l] = dg(x[l])  
         if do_plot:
             dmu = dg(x_pred)
-            fac = 3* (mu.max() - mu.min())
+            fac = 2* (mu.max() - mu.min())
             yoff = mu.mean() - fac
             sig = np.sqrt(var)
             ax[i].plot(x[l]-xoff, z_corr[l], '.')
             ax[i].plot(x_pred-xoff, mu, 'C1-')
-            ax[i].fill_between(x_pred-xoff, mu+sig, mu-sig, color='C1', alpha=0.2,lw=0)
+            ax[i].fill_between(x_pred - xoff, mu + sig, mu - sig, \
+                               color = 'C1', \
+                               alpha = 0.2, lw = 0)
             ax[i].plot(x_pred-xoff, dmu + yoff, 'C2-')
     if do_plot:
         ax[-1].set_xlabel('time % 1 yr (days)')
@@ -159,11 +164,99 @@ def extract_activity_basis(x, z, zerr = None,
 
     return (act_long_term, G, dG), (per_cyc, per_rot), res.x
 
+def construct_basis(x, activity_terms, \
+                    transiting_planets = None,
+                    other_periods = None): 
+    n_obs = len(x)    
+    n_act = len(activity_terms)
+    if transiting_planets is None:
+        n_trpl = 0
+    else:
+        n_trpl = len(transiting_planets)
+    if other_periods is None:
+        n_other = 0
+    else:
+        n_other = len(other_periods)
+    n_sin = n_trpl + 2 * n_other
+    Basis = np.zeros((1 + n_act + n_sin, n_obs))
+    Basis[0,:] = np.ones(n_obs)
+    for i in range(n_act):
+        tmp = activity_terms[i]
+        mi, ma = tmp.min(), tmp.max()
+        tmp -= mi
+        tmp /= (ma-mi)
+        Basis[1+i,:] = tmp
+    for i in range(n_trpl):
+        period, tc = transiting_planets[i]
+        Basis[1 + n_act + i] = np.sin(2 * np.pi * (x - tc) / period)        
+    for i in range(n_other):
+        Basis[1 + n_act + n_trpl + i] = \
+            np.sin(2 * np.pi * (x / other_periods[i]))
+        Basis[1 + n_act + n_trpl + i + 1] = \
+            np.cos(2 * np.pi * (x / other_periods[i]))
+    return Basis
+
+def fit_basis(x, y, yerr, basis, flags = None,
+              do_plot = True, do_save = False, save_name = 'FFper',
+              verbose = False):
+    if np.ndim(yerr) == 0:
+        weights = np.ones(len(x)) / yerr**2
+    else:
+        weights = 1.0 / yerr**2
+    if flags is None:
+        flags = np.zeros(basis.shape[0], 'bool')
+        flags[:4] = True
+    ymean = (y * weights).sum() / weights.sum()
+    chi2_constant = (((y - ymean) * weights)**2).sum()
+    model = LinearRegression(fit_intercept = False)
+    reg = model.fit(basis.T, y, sample_weight = weights)
+    yfit = reg.predict(basis.T)
+    resid = y - yfit
+    coeff = reg.coef_
+    yrect = y - coeff[0]
+    l = np.copy(flags) 
+    l[0] = False
+    yfit_act_only = np.dot(coeff[l], basis[l,:])
+    l = ~flags    
+    yfit_pl_only = np.dot(coeff[l], basis[l,:])
+    if do_plot:
+        freq, pow = LombScargle(x,yrect, yerr).autopower(samples_per_peak=10)
+        per = 1/freq
+        pow_act = LombScargle(x,yfit_act_only, yerr).power(freq)
+        pow_noact = LombScargle(x,yrect-yfit_act_only, yerr).power(freq)
+        pow_pl = LombScargle(x,yfit_pl_only, yerr).power(freq)
+        pow_resid = LombScargle(x,resid, yerr).power(freq)
+        fig, ax = plt.subplots(2, 1, figsize = (10, 8))
+        ax[0].plot(per, pow, 'k-', alpha = 0.5, label = 'data')
+        ax[0].plot(per, pow_act- 0.1, 'C0-', alpha = 0.5, label = 'activity')
+        ax[0].plot(per, pow_noact - 0.2, 'C1-', alpha = 0.5, label = 'activity-corrected')
+        ax[0].plot(per, pow_pl - 0.3, 'C2-', alpha = 0.5, label = 'planets')
+        ax[0].plot(per, pow_resid - 0.4, 'C3-', alpha = 0.5, label = 'residuals')
+        ax[0].set_ylabel('power')
+        ax[0].set_xlabel('period (days)')
+        plt.sca(ax[0])
+        plt.semilogx()
+        plt.xlim(per.min(), per.max())
+        plt.legend(loc = 0)
+        ax[1].plot(x, yrect, 'k.', ms = 2)
+        ax[1].plot(x, yfit_act_only, 'C0.', ms = 2)
+        off = 1.1 * (yrect.min() - (yrect - yfit_act_only).max())
+        ax[1].plot(x, yrect - yfit_act_only + off, 'C1.', ms = 2)
+        ax[1].plot(x, yfit_pl_only + off, 'C2.', ms = 2)
+        off += 1.1 * ((yrect - yfit_act_only).min() - resid.max())
+        ax[1].plot(x, resid + off, 'C3.', ms = 2)
+        ax[1].set_ylabel('RV (m/s)')
+        ax[1].set_xlabel('time (MJD)')
+        plt.tight_layout()
+        if do_save:
+            plt.savefig(save_dir + save_name + '_fit.png')
+    return resid, coeff
+
 if __name__ == "__main__":
 
     from scipy.io import loadmat
     root = '/Users/aigrain/Data/meunier2024/blind/data/'
-    fl = root + 'my_serie_res_bt_G2_1000_4m_NOISE0.09_OGS_MAG_real1.mat'    
+    fl = root + 'my_serie_res_bt_G2_1000_4m_NOISE0.09_OGS_MAG_real3.mat'    
     d = loadmat(fl)
     x = np.array(d['tt']).flatten()
     y = np.array(d['rv']).flatten()
@@ -181,7 +274,14 @@ if __name__ == "__main__":
     z = z[l]
     z_sig = z_sig[l]
     
-    res = extract_activity_basis(x, z, zerr = z_sig,
-                                 do_plot = True, do_save = False,
-                                 save_name = 'FFper', verbose = True)
+    activity_terms, activity_periods, GP_par = \
+        extract_activity_basis(x, z, zerr = z_sig,
+                               do_plot = True, do_save = False,
+                               save_name = 'FFper', verbose = True)
+
+    basis = construct_basis(x, activity_terms)
+    resid, coeff = fit_basis(x, y, y_sig, basis, 
+                                do_plot = True)
+    print(coeff)
+    
     plt.show()
