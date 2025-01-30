@@ -185,7 +185,7 @@ def construct_basis(x, activity_terms, \
         Basis[1+i,:] = tmp
     for i in range(n_trpl):
         period, tc = transiting_planets[i]
-        Basis[1 + n_act + i] = np.sin(2 * np.pi * (x - tc) / period)        
+        Basis[1 + n_act + i] = - np.sin(2 * np.pi * (x - tc) / period)        
     for i in range(n_other):
         Basis[1 + n_act + n_trpl + i] = \
             np.sin(2 * np.pi * (x / other_periods[i]))
@@ -246,7 +246,7 @@ def fit_basis(x, y, yerr, basis, flags = None,
         plt.tight_layout()
     return resid, coeff, fig
 
-def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 1.1,
+def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 10.0,
                        sig_add_w = 0.5, fap_threshold = 0.05,
                        n_pk_eval_max = 10):
     
@@ -265,7 +265,7 @@ def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 1.1,
     c.set_model(omegamax = 2*np.pi/per_min, 
                 V = V,
                 MH0 = basis.T, 
-                verbose=0)
+                verbose=0, oversampling = 40)
     c.l1_perio(numerical_method='lars',
                significance_evaluation_methods = ['fap','evidence_laplace'],
                max_n_significance_tests=n_pk_eval_max,
