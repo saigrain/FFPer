@@ -39,18 +39,28 @@ def extract_activity_basis(x, z, zerr = None,
         per = 1./freq
         ipk = np.argmax(pow)
         per_cyc = per[ipk]
-        act_long_term = ls.model(x, freq[ipk])
-        if verbose: 
-            print(f'Estimated activity cycle period: {per_cyc/365.25:.2f} years')
         if do_plot:
             fig_LS_act, axes = plt.subplots(nrows = 1, ncols = 2, \
                                             figsize = (15,5), width_ratios=[2, 1], sharey = True)
             ax = axes[0]
             per_yr = per / 365.25
-            axes[1].axvline(per_cyc/365.25, color = 'C2', ls = '--')
             axes[1].semilogx(per_yr, pow, 'C0-')
             axes[1].set_xlabel('Period (years)')
             axes[1].set_xlim(per_yr.min(), per_yr.max())
+        if per_cyc == max(per):
+            x0 = x.min()
+            act_long_term = np.polyval(np.polyfit(x-x0, z, 2), x-x0)
+            per_cyc = -1
+            if verbose: 
+                print(f'Activity cycle period = duration - using polynomial')
+            if do_plot:
+                axes[1].axvline(per_cyc/365.25, color = 'C2', ls = ':', lw = 2)
+        else:
+            act_long_term = ls.model(x, freq[ipk])
+            if verbose: 
+                print(f'Estimated activity cycle period: {per_cyc/365.25:.2f} years')
+            if do_plot:
+                axes[1].axvline(per_cyc/365.25, color = 'C2', ls = '--')
     z_corr = z - act_long_term
 
     # Compute LSper of long-term-corrected activity indicator 
@@ -157,10 +167,10 @@ def extract_activity_basis(x, z, zerr = None,
         plt.ylabel('activity indicator')
         plt.xlim(x.min(), x.max())
         plt.tight_layout()
-
-    return (act_long_term, G, dG), (per_cyc, per_rot), res.x, \
-        (fig_LS_act, fig_GdG, fig_basis)
-
+        return (act_long_term, G, dG), (per_cyc, per_rot), res.x, \
+            (fig_LS_act, fig_GdG, fig_basis)
+    return (act_long_term, G, dG), (per_cyc, per_rot), res.x
+        
 def construct_basis(x, activity_terms, \
                     transiting_planets = None,
                     other_periods = None): 
@@ -244,9 +254,10 @@ def fit_basis(x, y, yerr, basis, flags = None,
         ax[1].set_ylabel('RV (m/s)')
         ax[1].set_xlabel('time (MJD)')
         plt.tight_layout()
-    return resid, coeff, fig
+        return resid, coeff, fig
+    return resid, coeff
 
-def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 10.0,
+def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 1.1,
                        sig_add_w = 0.5, fap_threshold = 0.05,
                        n_pk_eval_max = 10):
     
@@ -265,7 +276,7 @@ def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 10.0,
     c.set_model(omegamax = 2*np.pi/per_min, 
                 V = V,
                 MH0 = basis.T, 
-                verbose=0, oversampling = 40)
+                verbose=0, oversampling = 10)
     c.l1_perio(numerical_method='lars',
                significance_evaluation_methods = ['fap','evidence_laplace'],
                max_n_significance_tests=n_pk_eval_max,
