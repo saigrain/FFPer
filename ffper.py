@@ -174,6 +174,7 @@ def extract_activity_basis(x, z, zerr = None,
 def construct_basis(x, activity_terms, \
                     transiting_planets = None,
                     other_periods = None): 
+    # print(other_periods)
     n_obs = len(x)    
     n_act = len(activity_terms)
     if transiting_planets is None:
@@ -193,13 +194,16 @@ def construct_basis(x, activity_terms, \
         tmp -= mi
         tmp /= (ma-mi)
         Basis[1+i,:] = tmp
+        # print(i+1, f'act {i}')
     for i in range(n_trpl):
         period, tc = transiting_planets[i]
+        # print(1 + n_act + i, period)
         Basis[1 + n_act + i] = - np.sin(2 * np.pi * (x - tc) / period)        
     for i in range(n_other):
-        Basis[1 + n_act + n_trpl + i] = \
+        # print(1 + n_act + n_trpl + i, 1 + n_act + n_trpl + i + 1, other_periods[i])
+        Basis[1 + n_act + n_trpl + 2 * i] = \
             np.sin(2 * np.pi * (x / other_periods[i]))
-        Basis[1 + n_act + n_trpl + i + 1] = \
+        Basis[1 + n_act + n_trpl + 2 * i + 1] = \
             np.cos(2 * np.pi * (x / other_periods[i]))
     return Basis
 
@@ -217,8 +221,8 @@ def fit_basis(x, y, yerr, basis, flags = None,
     model = LinearRegression(fit_intercept = False)
     reg = model.fit(basis.T, y, sample_weight = weights)
     yfit = reg.predict(basis.T)
-    resid = y - yfit
     coeff = reg.coef_
+    resid = y - yfit
     yrect = y - coeff[0]
     l = np.copy(flags) 
     l[0] = False
