@@ -297,3 +297,26 @@ def run_l1_periodogram(x, y, s, yerr, basis = None, per_min = 1.1,
     so = np.argsort(faps)
     return periods[so], faps[so]
 
+def run_LS_periodogram(x, y, s, yerr, basis = None, per_min = 1.1,
+                       sig_add_w = 0.5, fap_threshold = 0.05):
+    
+    if basis is None:
+        basis = np.zeros((1, len(x)))
+
+    x0 = np.floor(x.min())
+    t = x - x0
+
+    if sig_add_w>0:
+        y_sig = np.sqrt(yerr**2 + sig_add_w**2)
+    else:
+        y_sig = np.copy(yerr)
+
+    c = LombScargle(t,y, y_sig)
+    freq, pow = c.autopower(maximum_frequency = 1.0/per_min, 
+                            samples_per_peak = 10)
+    i = np.argmax(pow)
+    fap = c.false_alarm_probability(pow[i])
+    if fap > fap_threshold:
+        return [], []
+    return [1./freq[i]], [fap]
+
